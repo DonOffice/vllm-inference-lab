@@ -3,12 +3,11 @@
 > 原则:只提**亲手复现过**的问题;先搜 issue 避免重复;文档 PR 也要有数据支撑。
 > 每个候选都标了证据、预期 PR 形态和提交前核对项。状态:☑=已核实可行 / ◐=提交前需再核对
 
-## 候选 1:SGLang `bench_serving` 的 random 数据集仍强制下载 ShareGPT ☑
+## 候选 1:SGLang `bench_serving` 的 random 数据集强制下载 ShareGPT ☑ 已提 issue
 
-- **证据**:本机 0.5.22 实测——`--dataset-name random` 仍向 `huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered` 发 HEAD 请求,离线/受限网络下重试 5 次后失败(`HF_HUB_OFFLINE=1` 则直接抛 OfflineModeIsEnabled)。
-- **已知 issue**:[sgl-project/sglang #4133](https://github.com/sgl-project/sglang/issues/4133)"Random dataset in benchmark_serving is not random"——**问题已被报告,别重复报**;去 issue 下确认无人认领修复后评论 "I'd like to work on this",再动代码。
-- **修复思路**(认领后):`python -m sglang.benchmark.serving` 的启动路径里,`--dataset-name random` 时跳过 ShareGPT 预载(注意 0.5.x 里旧入口 `sglang.bench_serving` 已弃用,改新入口)。
-- **PR 流程要点**:SGLang 用 GitHub PR + CI;commit 加 `Signed-off-by`(DCO);PR 描述链接 #4133 并附复现环境(WSL2 + HF 不可达)。
+- **进展**:2026-10-30 已提交 issue [sgl-project/sglang#47420](https://github.com/sgl-project/sglang/issues/47420)(含复现命令、根因定位到 `datasets/random.py` 的 random_sample 路径、三个修复方案)。
+- **勘误**:此前调研引用的"#4133"经 gh 核实在仓库中不存在(搜索引擎给了坏链接)——教训:引用 issue 前必须 `gh issue view` 验证。防重复三搜 + main 分支源码核对(下载块仍在,`random-ids` 离线变体不可发现)均已完成,确认无人报过。
+- **下一步**:等维护者表态选哪个方案 → 按其偏好提 PR(docs / actionable error / auto-fallback 三选一,修复思路已写在 issue 里)。
 
 ## 候选 2:vLLM Benchmark CLI 文档:把"prefix cache 会污染重复压测"的提示扩成可操作说明 ☑◐
 
