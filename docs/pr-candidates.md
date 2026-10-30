@@ -9,15 +9,11 @@
 - **勘误**:此前调研引用的"#4133"经 gh 核实在仓库中不存在(搜索引擎给了坏链接)——教训:引用 issue 前必须 `gh issue view` 验证。防重复三搜 + main 分支源码核对(下载块仍在,`random-ids` 离线变体不可发现)均已完成,确认无人报过。
 - **下一步**:等维护者表态选哪个方案 → 按其偏好提 PR(docs / actionable error / auto-fallback 三选一,修复思路已写在 issue 里)。
 
-## 候选 2:vLLM Benchmark CLI 文档:把"prefix cache 会污染重复压测"的提示扩成可操作说明 ☑◐
+## 候选 2:vLLM Benchmark CLI 文档 ☑ base-url 部分已提 PR,prefix-cache 部分作废
 
-- **现状**:官方 [Benchmark CLI](https://docs.vllm.ai/en/latest/benchmarking/cli) 已有一句 note:重复对同一 server 跑 `vllm bench serve` 会因 prefix cache 复用 prompt 而虚高吞吐。**但没有成因、复现步骤和规避方法**。
-- **我们的增量**(全部实测,见 [docs/基线数据.md](基线数据.md) §3):
-  - 成因链:bench 默认固定随机种子 → 各轮压测用同一批 prompt → 服务默认开 prefix caching → 第二轮起命中第一轮 KV
-  - 数字:污染版 c=8 吞吐 445 vs 干净版 320 tok/s(+39% 虚高);c=2 的 TTFT 出现物理上不可能的 35ms
-  - 规避:档间换 `--seed` 或重启服务;附最小复现命令
-- **PR 形态**:docs/source/benchmarking/cli.md(以当时 main 分支路径为准)扩充该 note,链接到结果 JSON 的对照表。提交前核对:main 分支该文件现状(用 `gh api` 或网页),确认没被别人改过。
-- **同类小补充**(顺手核对):`--base-url` 不要带 `/v1` 后缀(带了解析到 `/v1/v1/...` 全 404,我们实测踩过);若文档未提,一并加一句 caution。
+- **勘误(2026-10-30)**:克隆 main 核对后发现,线上 latest 文档页(10-28 构建)滞后于 main——prefix-cache 污染的**成因与规避已有人在 main 写全**(vary `--seed`/restart/`vllm bench sweep serve`)。教训:线上文档有构建延迟,**提文档 PR 前必须核对 main 分支源文件**,而非线上页面。
+- **已落地**:残留的干净增量 `--base-url` 勿带 `/v1` 后缀(全 benchmarking 目录零提及)→ PR [vllm-project/vllm#64698](https://github.com/vllm-project/vllm/pull/64698)(分支 `doc/bench-serve-base-url-note`,DCO 已签,含复现验证)。
+- **后续**:跟进 CI 与 review,48h 无响应可礼貌 ping。
 
 ## 候选 3:vLLM 安装文档:受限网络环境的坑与解法 ◐
 
