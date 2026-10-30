@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# 本地实验产物(不进版本库)
+bench/results/
+bench/*.log
+bench/*.json
+!bench/.gitkeep
+
+# 编辑器/系统
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# 临时验证文件
+_c*.js
+_chk.js
+_test_*
