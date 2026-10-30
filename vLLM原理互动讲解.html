@@ -1,0 +1,985 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vLLM 原理互动讲解 · 从第一性原理到优化方向</title>
+<style>
+:root{
+  --bg:#f6f7f9; --card:#ffffff; --ink:#1f2430; --muted:#69707d; --line:#e4e7ec;
+  --blue:#2f6fd6; --blue-soft:#e8f0fd; --orange:#e8890c; --orange-soft:#fdf1de;
+  --green:#17954e; --green-soft:#e4f5eb; --red:#d64545; --red-soft:#fbe9e9;
+  --purple:#7c5cd6; --purple-soft:#f0ebfb; --teal:#0e8f8f; --teal-soft:#e2f4f4;
+  --shadow:0 1px 3px rgba(16,24,40,.07),0 1px 2px rgba(16,24,40,.04);
+  --radius:14px;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;font-family:"Segoe UI","Microsoft YaHei",-apple-system,sans-serif;background:var(--bg);color:var(--ink);font-size:15px;line-height:1.65}
+header{position:sticky;top:0;z-index:50;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:10px 20px 8px}
+header h1{font-size:18px;margin:0 0 6px;font-weight:600}
+header h1 small{color:var(--muted);font-weight:400;font-size:12.5px;margin-left:10px}
+nav{display:flex;gap:6px;flex-wrap:wrap}
+nav a{font-size:12.5px;color:var(--muted);text-decoration:none;padding:4px 11px;border-radius:99px;background:#eef0f4;transition:all .2s}
+nav a:hover{color:var(--ink);background:#e2e6ee}
+nav a.active{background:var(--blue);color:#fff}
+main{max-width:1060px;margin:0 auto;padding:18px 20px 60px}
+section{margin:26px 0;scroll-margin-top:86px}
+h2{font-size:21px;margin:0 0 4px;font-weight:650}
+h2 .no{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:9px;background:var(--blue);color:#fff;font-size:14px;margin-right:9px;vertical-align:-3px}
+h3{font-size:15.5px;margin:18px 0 8px;font-weight:600}
+.lead{color:var(--muted);font-size:13.5px;margin:0 0 14px;max-width:860px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px 18px;margin:12px 0}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+@media(max-width:860px){.grid2,.grid4{grid-template-columns:1fr}}
+button{font:inherit;cursor:pointer;border-radius:10px;border:1px solid var(--line);background:#fff;padding:6px 14px;font-size:13px;transition:all .15s}
+button:hover{border-color:#c9d2e0;background:#f7f9fc}
+button.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+button.primary:hover{background:#2861bd}
+button.on{background:var(--green-soft);border-color:var(--green);color:var(--green)}
+.controls{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin:10px 0}
+label.f{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted)}
+select,input[type=range]{font:inherit}
+select{padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:#fff;font-size:13px}
+input[type=range]{width:170px;accent-color:var(--blue)}
+.badge{display:inline-block;background:var(--blue-soft);color:var(--blue);border-radius:99px;padding:2px 11px;font-size:12px;font-weight:500}
+.badge.g{background:var(--green-soft);color:var(--green)}
+.badge.o{background:var(--orange-soft);color:var(--orange)}
+.badge.r{background:var(--red-soft);color:var(--red)}
+.stat{font-variant-numeric:tabular-nums}
+table{border-collapse:collapse;width:100%;font-size:13px;margin:8px 0}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:500;font-size:12.5px;background:#fafbfc}
+code{background:#eef1f5;border-radius:5px;padding:1px 6px;font-size:12.5px;font-family:Consolas,Menlo,monospace}
+.tip{font-size:12.5px;color:var(--muted);margin-top:8px}
+.tag-num{font-variant-numeric:tabular-nums;font-weight:600}
+
+/* ── 第1讲 管线 ── */
+.pipeline{display:flex;gap:0;margin:14px 0 6px;overflow-x:auto;padding-bottom:6px}
+.pipe-node{flex:1;min-width:118px;position:relative;padding:10px 6px 12px;text-align:center;border-radius:12px;background:#f2f4f7;color:var(--muted);font-size:12.5px;cursor:pointer;transition:all .25s;border:2px solid transparent}
+.pipe-node .em{display:block;font-size:21px;margin-bottom:3px}
+.pipe-node:not(:last-child)::after{content:"";position:absolute;right:-9px;top:50%;width:18px;height:2px;background:#cdd4de;z-index:0}
+.pipe-node.act{background:var(--blue);color:#fff;transform:translateY(-4px);box-shadow:0 6px 16px rgba(47,111,214,.35)}
+.pipe-node.done{background:var(--blue-soft);color:var(--blue)}
+#pkt{position:absolute;width:14px;height:14px;border-radius:50%;background:var(--orange);box-shadow:0 0 0 5px rgba(232,137,12,.18);transition:left .5s cubic-bezier(.5,0,.3,1),top .5s;z-index:5;top:0;left:0}
+.duo{display:grid;grid-template-columns:1fr 130px 1fr;gap:0;align-items:center;margin-top:10px}
+.duo .box{border:2px solid var(--line);border-radius:12px;padding:9px 13px;font-size:12.5px;background:#fbfcfd}
+.duo .box b{display:block;font-size:13px}
+.duo .q{height:6px;border-radius:3px;background:linear-gradient(90deg,var(--blue) 0 8px,#e6ebf2 8px 22px,var(--blue) 22px 30px,#e6ebf2 30px 46px,var(--blue) 46px 54px,#e6ebf2 54px 100%);background-size:54px 100%;animation:qflow 1.2s linear infinite}
+@keyframes qflow{to{background-position:54px 0}}
+
+/* ── 第2讲 显存条 ── */
+.memwrap{position:relative;height:44px;border-radius:11px;background:#edf0f4;overflow:hidden;display:flex;box-shadow:inset 0 1px 2px rgba(0,0,0,.05)}
+.memseg{transition:width .45s cubic-bezier(.3,.7,.3,1);position:relative}
+.memseg span{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11.5px;color:#fff;white-space:nowrap;overflow:hidden}
+.memcap{position:absolute;top:-5px;bottom:-5px;width:0;border-left:2px dashed var(--red);z-index:3}
+.memcap i{position:absolute;top:-18px;left:-24px;font-style:normal;font-size:11px;color:var(--red);white-space:nowrap}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;margin-top:8px;color:var(--muted)}
+.legend b{color:var(--ink)}
+.sw{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.statsrow{display:flex;gap:22px;flex-wrap:wrap;margin-top:10px;font-size:13px}
+
+/* ── 第3讲 roofline ── */
+.roofwrap{display:grid;grid-template-columns:1fr 300px;gap:16px;align-items:start}
+@media(max-width:860px){.roofwrap{grid-template-columns:1fr}}
+.pdgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.pd{border:1px solid var(--line);border-radius:12px;padding:11px 13px;font-size:12.5px}
+.pd b{font-size:13px}
+.pd svg{width:100%;height:auto;display:block;margin:6px 0}
+
+/* ── 第4讲 分页 ── */
+.board{border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:#fbfcfd}
+.pool{display:flex;flex-wrap:wrap;gap:5px;min-height:52px;margin-top:8px}
+.blk{width:30px;height:21px;border-radius:5px;transition:transform .25s,opacity .25s;position:relative}
+.blk.new{animation:pop .4s}
+@keyframes pop{0%{transform:scale(.3);opacity:0}100%{transform:scale(1);opacity:1}}
+.blk.free{background:#e8ebef;opacity:.6}
+.pgrow{display:flex;align-items:center;gap:6px;margin:7px 0;font-size:12px}
+.pgrow .bar{flex:1;height:17px;border-radius:5px;background:#edf0f4;position:relative;overflow:hidden}
+.pgrow .fill{position:absolute;inset:0 auto 0 0;border-radius:5px 0 0 5px;transition:width .4s}
+.pgrow .waste{position:absolute;inset:0 0 0 auto;background:repeating-linear-gradient(45deg,transparent 0 4px,rgba(214,69,69,.22) 4px 8px)}
+.ptable{font-size:11.5px;color:var(--muted);font-family:Consolas,monospace;margin:3px 0}
+.cnt{display:flex;gap:18px;font-size:12.5px;margin-top:8px;flex-wrap:wrap}
+
+/* ── 第5讲 甘特 ── */
+.ganttrow{display:grid;grid-template-columns:96px 1fr;gap:8px;align-items:center}
+.lane{position:relative;height:118px;border-bottom:1px dashed var(--line)}
+.req{position:absolute;height:15px;border-radius:5px;overflow:hidden}
+.req .prog{position:absolute;inset:0 auto 0 0;width:0;background:inherit;filter:brightness(1.12)}
+.req .ghost{position:absolute;top:0;bottom:0;border:1.5px dashed rgba(214,69,69,.55);border-radius:5px}
+.utilbar{height:9px;border-radius:5px;background:#edf0f4;overflow:hidden;margin-top:4px}
+.utilbar i{display:block;height:100%;background:var(--green);width:0;transition:width .3s}
+.charttip{position:fixed;background:#232833;color:#fff;border-radius:8px;padding:7px 11px;font-size:12px;pointer-events:none;opacity:0;transition:opacity .15s;z-index:99;max-width:230px}
+
+/* ── 第6讲 源码树 ── */
+.codewrap{display:grid;grid-template-columns:minmax(230px,300px) 1fr;gap:14px;align-items:start}
+@media(max-width:860px){.codewrap{grid-template-columns:1fr}}
+.ci{display:block;width:100%;text-align:left;border:0;background:transparent;padding:8px 12px;border-radius:10px;font-size:13px}
+.ci:hover{background:#f2f4f7}
+.ci.act{background:var(--blue-soft);color:var(--blue)}
+.ci small{display:block;color:var(--muted);font-size:11.5px}
+.chain{display:flex;flex-wrap:wrap;gap:4px;align-items:center;font-size:12px;color:var(--muted);margin:6px 0 12px}
+.chain span{background:#f2f4f7;border-radius:8px;padding:3px 9px}
+.chain em{font-style:normal;color:#b3bac4}
+
+/* ── 第7讲 量化 ── */
+.qgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
+.qcube{display:flex;flex-wrap:wrap;gap:3px;margin:8px 0}
+.qcube i{width:17px;height:17px;border-radius:4px;background:var(--blue);opacity:.85;transition:all .3s}
+
+/* ── 第8讲 并行 ── */
+.svghd{font-size:12.5px;font-weight:600;margin:8px 0 2px}
+.dpcard{border:1px solid var(--line);border-radius:13px;padding:12px 14px;background:#fbfcfd;transition:all .25s;position:relative}
+.dpcard.pick{border-color:var(--blue);background:var(--blue-soft);box-shadow:0 4px 14px rgba(47,111,214,.16)}
+.dpcard .fitflag{position:absolute;top:10px;right:10px}
+@keyframes dash{to{stroke-dashoffset:-26}}
+.flowline{stroke-dasharray:6 7;animation:dash 1.1s linear infinite}
+
+/* ── 第9讲 ── */
+.apple{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:860px){.apple{grid-template-columns:1fr}}
+.apple svg{width:100%;height:auto;display:block}
+
+footer{border-top:1px solid var(--line);margin-top:34px;padding:16px 20px;color:var(--muted);font-size:12px;max-width:1060px;margin-inline:auto}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+@media(max-width:640px){main{padding:14px 12px 40px}header{padding:8px 12px 6px}}
+</style>
+</head>
+<body>
+<header>
+  <h1>vLLM 原理互动讲解<small>从第一性原理到优化方向 · 2026-10 · 全部延迟/吞吐数字为本机实测(RTX 4070 Ti Super 16GB / vLLM 0.32.0)</small></h1>
+  <nav id="nav">
+    <a href="#s1">① 请求旅程</a><a href="#s2">② 显存账本</a><a href="#s3">③ 两阶段与屋顶线</a><a href="#s4">④ 分页 KV</a><a href="#s5">⑤ 批与调度</a><a href="#s6">⑥ 源码地图</a><a href="#s7">⑦ 量化取舍</a><a href="#s8">⑧ 多卡多机</a><a href="#s9">⑨ 方向与工具</a>
+  </nav>
+</header>
+<main>
+
+<!-- ═════════ ① 请求旅程 ═════════ -->
+<section id="s1">
+  <h2><span class="no">1</span>一条请求的旅程:从 curl 到第一个 token</h2>
+  <p class="lead">把 vLLM 想成一座工厂:门口有接待(API)、有调度室(Scheduler)、有大仓库(KV Cache)、有车间(GPU)。点下面的站点,或者让它自动播放。</p>
+  <div class="card">
+    <div class="controls">
+      <button id="jPrev">← 上一步</button>
+      <button id="jNext" class="primary">下一步 →</button>
+      <button id="jAuto">▶ 自动播放</button>
+      <span class="badge" id="jCnt">1 / 7</span>
+    </div>
+    <div style="position:relative"><div class="pipeline" id="pipe"></div><div id="pkt"></div></div>
+    <div id="jDetail" style="margin-top:12px"></div>
+    <h3>藏在日志里的双进程架构</h3>
+    <p class="tip">你跑服务时一定见过 <code>(APIServer pid=xxx)</code> 和 <code>(EngineCore pid=xxx)</code>——它们是两个独立进程:左边管 HTTP 和分词,右边独占 GPU 算,中间靠消息队列传令。好处:API 层再忙也不拖累生成,反之亦然。</p>
+    <div class="duo">
+      <div class="box"><b>APIServer 进程</b>HTTP 路由 · chat 模板 · 分词 → 变成 token 序列</div>
+      <div><div class="q" title="消息队列(ZMQ)"></div><div class="tip" style="text-align:center">消息队列</div></div>
+      <div class="box"><b>EngineCore 进程</b>调度器组批 → GPU 执行 → 流式吐 token</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════ ② 显存账本 ═════════ -->
+<section id="s2">
+  <h2><span class="no">2</span>显存账本:一切优化的第一性原理</h2>
+  <p class="lead">只有两条公式:<b>权重 = 参数量 × 每参数字节</b>;<b>KV = 2 × 层数 × KV头数 × 头维度 × 字节 × token数</b>。拖动下面的参数,看一张 16GB 的卡是怎么被吃掉的。</p>
+  <div class="card">
+    <div class="controls">
+      <label class="f">模型
+        <select id="mModel"><option value="1.7">Qwen3-1.7B(28层)</option><option value="8" selected>Qwen3-8B(36层)</option><option value="32">Qwen3-32B(64层)</option></select>
+      </label>
+      <label class="f">权重量化
+        <select id="mBits"><option value="16">BF16</option><option value="8">FP8/INT8</option><option value="4" selected>INT4</option></select>
+      </label>
+      <label class="f">KV 精度
+        <select id="mKv"><option value="2" selected>FP16 KV</option><option value="1">FP8 KV</option></select>
+      </label>
+      <label class="f">上下文 <b id="mCtxV" class="tag-num">8k</b>
+        <input type="range" id="mCtx" min="1" max="128" value="8">
+      </label>
+      <label class="f">并发路数 <b id="mConcV" class="tag-num">4</b>
+        <input type="range" id="mConc" min="1" max="32" value="4">
+      </label>
+      <label class="f">显存
+        <select id="mVram"><option value="16" selected>16 GB(本机)</option><option value="24">24 GB</option><option value="32">2×16 GB</option></select>
+      </label>
+    </div>
+    <div class="controls" style="margin-top:2px">
+      <span class="tip" style="margin:0">一键场景:</span>
+      <button class="pset" data-m="8" data-b="16" data-c="8" data-n="4">8B 全精度(教科书式翻车)</button>
+      <button class="pset" data-m="8" data-b="4" data-c="8" data-n="4">8B-INT4(本机现状)</button>
+      <button class="pset" data-m="32" data-b="4" data-c="8" data-n="2">32B-INT4 单卡</button>
+      <button class="pset" data-m="1.7" data-b="16" data-c="32" data-n="16">1.7B 长上下文</button>
+    </div>
+    <div class="memwrap" id="mBar"></div>
+    <div class="legend" id="mLegend"></div>
+    <div class="statsrow" id="mStats"></div>
+    <p class="tip" id="mVerdict"></p>
+  </div>
+  <div class="card">
+    <h3>为什么 KV 只算"KV 头"?——GQA 的红利</h3>
+    <p style="font-size:13.5px;margin:4px 0">Qwen3-8B 有 32 个查询头,但只有 <b>8 个 KV 头</b>(4 组查询头共享一组 K/V)。KV 缓存因此缩小 4 倍。DeepSeek 的 MLA 更进一步:把整层 KV 压缩成一个低秩向量,再压一个数量级——这是它敢把上下文做到超长的结构性底牌。结构带来的显存节省,任何软件优化都追不上。</p>
+  </div>
+</section>
+
+<!-- ═════════ ③ 两阶段与屋顶线 ═════════ -->
+<section id="s3">
+  <h2><span class="no">3</span>Prefill 与 Decode:两种完全不同的物理</h2>
+  <p class="lead">prefill(预填充)一次算几百上千个 token,是大矩阵乘 → <b>算力受限</b>;decode(解码)每步只算 1 个 token,却要把全部权重读一遍 → <b>带宽受限</b>。这一件事解释了 LLM 推理 80% 的现象。</p>
+  <div class="card">
+    <div class="pdgrid">
+      <div class="pd"><b>Prefill · 算力受限</b>
+        <svg viewBox="0 0 220 92">
+          <rect x="6" y="18" width="34" height="64" rx="5" fill="#dbe6f7"/><rect x="12" y="24" width="22" height="10" rx="2" fill="#9db9e6"/><rect x="12" y="38" width="22" height="10" rx="2" fill="#9db9e6"/><rect x="12" y="52" width="22" height="10" rx="2" fill="#9db9e6"/><rect x="12" y="66" width="22" height="10" rx="2" fill="#9db9e6"/>
+          <text x="23" y="12" text-anchor="middle" font-size="9.5" fill="#69707d">1024 tokens</text>
+          <rect x="62" y="18" width="60" height="64" rx="5" fill="#f0ebfb"/>
+          <text x="92" y="54" text-anchor="middle" font-size="10" fill="#7c5cd6">权重矩阵</text>
+          <path d="M44 50 L58 50" stroke="#2f6fd6" stroke-width="2" marker-end="url(#arr)"/>
+          <rect x="140" y="18" width="34" height="64" rx="5" fill="#e2f4f4"/>
+          <text x="157" y="54" text-anchor="middle" font-size="9.5" fill="#0e8f8f">输出</text>
+          <path d="M126 50 L134 50" stroke="#2f6fd6" stroke-width="2" marker-end="url(#arr)"/>
+          <text x="110" y="88" text-anchor="middle" font-size="9.5" fill="#69707d">大 GEMM:算力打满,带宽无所谓</text>
+          <defs><marker id="arr" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0 0 L6 2.5 L0 5 z" fill="#2f6fd6"/></marker></defs>
+        </svg>
+        <div>TTFT 的决定者。prompt 越长越慢;prefix cache 命中 = 跳过这一步。</div>
+      </div>
+      <div class="pd"><b>Decode · 带宽受限</b>
+        <svg viewBox="0 0 220 92">
+          <rect x="10" y="40" width="20" height="12" rx="3" fill="#9db9e6"/>
+          <text x="20" y="34" text-anchor="middle" font-size="9.5" fill="#69707d">1 token</text>
+          <rect x="52" y="18" width="60" height="64" rx="5" fill="#f0ebfb"/>
+          <text x="82" y="54" text-anchor="middle" font-size="10" fill="#7c5cd6">整个权重</text>
+          <text x="82" y="67" text-anchor="middle" font-size="9" fill="#d64545">都要读一遍</text>
+          <path d="M34 46 L48 46" stroke="#2f6fd6" stroke-width="2" marker-end="url(#arr2)"/>
+          <rect x="128" y="40" width="18" height="12" rx="3" fill="#7ed4b8"/>
+          <path d="M116 46 L124 46" stroke="#2f6fd6" stroke-width="2" marker-end="url(#arr2)"/>
+          <text x="108" y="88" text-anchor="middle" font-size="9.5" fill="#69707d">读 5GB 权重只为产 1 个 token</text>
+          <defs><marker id="arr2" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto"><path d="M0 0 L6 2.5 L0 5 z" fill="#2f6fd6"/></marker></defs>
+        </svg>
+        <div>生成速度的决定者:tok/s ≈ 带宽 ÷ 权重体积。这就是量化的直接收益。</div>
+      </div>
+    </div>
+    <h3>屋顶线(Roofline):为什么并发越高总吞吐越高</h3>
+    <p class="tip" style="margin-top:2px">横轴"算术强度"= 每 1 字节读写能做多少次浮点运算。斜线是带宽屋顶,横线是算力屋顶。解码时 batch=1 的强度极低(纯亏),batch 越大,权重读一遍能服务越多 token,强度沿斜线爬升——<b>并发就是在把工作点从"带宽饿死"推向"算力吃满"</b>。</p>
+    <div class="roofwrap">
+      <svg id="roof" viewBox="0 0 520 300" style="width:100%;height:auto"></svg>
+      <div>
+        <label class="f">解码批大小 batch <b id="rBv" class="tag-num">1</b>
+          <input type="range" id="rB" min="1" max="64" value="1" style="width:100%">
+        </label>
+        <div class="card" style="padding:11px 13px;margin-top:8px" id="rOut"></div>
+      </div>
+    </div>
+    <p class="tip">模型假设:Qwen3-8B-INT4(权重 4.6GB),上下文 1024(KV 0.14GB/token),带宽 672GB/s,有效算力 ≈50 TFLOPS,忽略注意力/调度开销。结论方向正确:batch=1 时带宽利用率 3%,batch=32 时约 35%——还有巨大空间,这就是为什么大规模服务敢把 batch 堆到几百。</p>
+  </div>
+</section>
+
+<!-- ═════════ ④ 分页 KV ═════════ -->
+<section id="s4">
+  <h2><span class="no">4</span>分页 KV:你猜对了,这就是操作系统页表</h2>
+  <p class="lead">把"每个请求预留一整段显存"改成"按需领 16-token 小块,查表寻址"——vLLM 的核心创新 PagedAttention,灵感就是虚拟内存分页。左:老办法的浪费;右:块池 + 页表 + 共享。</p>
+  <div class="card">
+    <div class="controls">
+      <button id="pgAdd" class="primary">+ 来一条请求</button>
+      <button id="pgEvict">逐出最旧请求(LRU)</button>
+      <button id="pgShare" class="on">共享系统提示词块:开</button>
+      <button id="pgReset">重置</button>
+    </div>
+    <div class="grid2">
+      <div class="board"><b style="font-size:13px">传统连续分配</b><div id="pgOld" style="margin-top:6px"></div><div class="cnt" id="pgOldCnt"></div></div>
+      <div class="board"><b style="font-size:13px">分页分配(块池 + 页表)</b>
+        <div class="pool" id="pgPool"></div>
+        <div id="pgMaps"></div><div class="cnt" id="pgNewCnt"></div>
+      </div>
+    </div>
+    <p class="tip">点"共享"再观察:所有请求的第一个块指向<b>同一个物理块</b>——相同 system prompt 只算一次,这正是 prefix caching 的机制(本机实测 TTFT 1070ms → 28ms)。数值源头:vLLM 论文测得传统分配浪费可达 60-80%,分页后 &lt;4%。</p>
+  </div>
+</section>
+
+<!-- ═════════ ⑤ 批与调度 ═════════ -->
+<section id="s5">
+  <h2><span class="no">5</span>批与调度:吞吐从哪来</h2>
+  <p class="lead">上面:静态批处理(整批一起走,短请求陪跑)vs 连续批处理(完成即退场,空位即补人)。下面:本机实测,并发 8 总吞吐 4.5 倍,而每条流从 77.5 降到 50.3 tok/s——吞吐与延迟的交换。</p>
+  <div class="card">
+    <div class="controls">
+      <button id="bPlay" class="primary">▶ 播放</button>
+      <span class="badge" id="bTime">t = 0 ms</span>
+      <span class="badge g" id="bUtilS">静态批 GPU 利用 --%</span>
+      <span class="badge g" id="bUtilC">连续批 GPU 利用 --%</span>
+      <label class="f" style="margin-left:auto">速度
+        <select id="bSpd"><option value="0.6">0.5×</option><option value="1.2" selected>1×</option><option value="2.4">2×</option></select>
+      </label>
+    </div>
+    <div class="ganttrow"><div class="tip" style="text-align:right">静态批<br>(虚线=白等)</div><div class="lane" id="laneS"></div></div>
+    <div class="ganttrow"><div class="tip" style="text-align:right">连续批<br>(即时补位)</div><div class="lane" id="laneC"></div></div>
+    <h3>Chunked Prefill:别让长 prompt 卡住所有人</h3>
+    <div class="grid2">
+      <div class="pd"><b>关闭:整段 prefill 独占</b>
+        <div id="cpOff" class="cpstrip"></div><div class="tip">长请求的 8k-token prefill 期间,正在生成的请求全部停摆(TTFT 别人替它付)。</div></div>
+      <div class="pd"><b>开启:切片穿插(vLLM 默认)</b>
+        <div id="cpOn" class="cpstrip"></div><div class="tip">prefill 切成小片插在 decode 步之间,每代一个 token 的节奏不被打断。</div></div>
+    </div>
+    <h3>本机实测:总吞吐 vs 并发(Qwen3-8B-AWQ,输入1024/输出256,32请求)</h3>
+    <svg id="bChart" viewBox="0 0 640 240" style="width:100%;height:auto"></svg>
+    <p class="tip">悬停柱子看细节。第四根柱子(并发8)上标注了每流速度:总吞吐 320.5 tok/s = 8 流 × 50.3 tok/s(实测 TPOT 19.9ms)。</p>
+  </div>
+</section>
+
+<!-- ═════════ ⑥ 源码地图 ═════════ -->
+<section id="s6">
+  <h2><span class="no">6</span>源码地图:哪个目录管什么</h2>
+  <p class="lead">仓库在 WSL <code>~/dev/vllm</code>(v0.32.0,可编辑安装,改 Python 重启即生效)。先看调用链,再逐个目录点开。</p>
+  <div class="card">
+    <div class="chain" id="codeChain"></div>
+    <div class="codewrap">
+      <div id="codeList"></div>
+      <div class="card" style="margin:0;padding:13px 15px" id="codeDetail"></div>
+    </div>
+    <p class="tip">阅读顺序建议(由浅入深):entrypoints → v1/engine → v1/core → v1/worker → attention / quantization → distributed。配合实验:在 vllm-dev 环境里随便挑一文件加一行 <code>logger.warning("here")</code>,重启服务看日志,是建立"改哪里生效哪里"直觉的最快方式。</p>
+  </div>
+</section>
+
+<!-- ═════════ ⑦ 量化取舍 ═════════ -->
+<section id="s7">
+  <h2><span class="no">7</span>量化:用精度换显存与速度</h2>
+  <p class="lead">拖动位数:左边的"权重块"按体积缩水,右边柱状图显示对应的<b>理论单流上限</b>(672GB/s ÷ 权重体积),4bit 处还叠了本机实测值 77.5 tok/s 作对照。</p>
+  <div class="card">
+    <div class="qgrid">
+      <div>
+        <label class="f">每权重位数 <b id="qBitsV" class="tag-num">4 bit</b>
+          <input type="range" id="qBits" min="2" max="16" value="4" style="width:100%">
+        </label>
+        <div class="qcube" id="qCube"></div>
+        <div class="statsrow" id="qStats"></div>
+        <p class="tip" id="qQuality"></p>
+      </div>
+      <div><svg id="qChart" viewBox="0 0 330 210" style="width:100%;height:auto"></svg>
+      <p class="tip">绿虚线 = 本机实测 77.5 tok/s(8B-INT4/AWQ-Marlin)。它落在理论上限 118 的 66% 处,差距来自采样/调度/注意力开销——"优化空间"的量化定义。</p></div>
+    </div>
+    <table>
+      <thead><tr><th>方案</th><th>压缩</th><th>本卡表现(Ada sm_89)</th><th>质量</th><th>验证方法</th></tr></thead>
+      <tbody>
+        <tr><td>BF16</td><td>1×</td><td>8B 就要 16GB,放不下 KV</td><td>基线</td><td rowspan="4">lm-eval-harness / OpenCompass 固定题库,量化前后各跑一遍,对比 MMLU / GSM8K 掉分</td></tr>
+        <tr><td>AWQ / GPTQ-INT4</td><td>~4×</td><td>Marlin 内核,实测 77.5 tok/s</td><td>PPL 损失小,日常难察觉</td></tr>
+        <tr><td>FP8(W8A8)</td><td>2×</td><td>能跑但无原生 FP8 算力,优势打折</td><td>几乎无损(H100 甜点)</td></tr>
+        <tr><td>2-bit(AQLM 类)</td><td>~8×</td><td>需训练补偿,支持少</td><td>明显损失</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═════════ ⑧ 多卡多机 ═════════ -->
+<section id="s8">
+  <h2><span class="no">8</span>多卡与多机:切模型,还是切请求?</h2>
+  <p class="lead">四把刀:TP 把一层切开、PP 按层切、EP 按专家切、DP 整模型复制。选场景,高亮的卡就是推荐组合。</p>
+  <div class="card">
+    <div class="controls">
+      <label class="f">场景
+        <select id="dScene" style="min-width:300px">
+          <option value="a" selected>2×16GB 跑 Qwen3-32B-AWQ(权重 ~18GB)</option>
+          <option value="b">16GB 单卡跑 Qwen3-8B(本机现状)</option>
+          <option value="c">多机集群跑 MoE 大模型(DeepSeek 路线)</option>
+        </select>
+      </label>
+    </div>
+    <div class="grid4" id="dCards"></div>
+    <div class="card" style="background:var(--blue-soft);border-color:#c6d9f5" id="dAdvice"></div>
+    <p class="tip" id="dCmd"></p>
+  </div>
+</section>
+
+<!-- ═════════ ⑨ 方向与工具 ═════════ -->
+<section id="s9">
+  <h2><span class="no">9</span>优化方向地图 + 行业对照 + 工具链</h2>
+  <p class="lead">四类需求各有杠杆;DeepInfer 改了哪里就说明 vLLM 哪里有油水;Apple 的"快"是数据搬运的快;工具链分三层视野。</p>
+  <div class="card">
+    <h3>需求 → 杠杆 → 本机实验</h3>
+    <table>
+      <thead><tr><th>需求</th><th>技术杠杆</th><th>本机可做</th></tr></thead>
+      <tbody>
+        <tr><td rowspan="3"><b>更快</b>(延迟)</td><td>Decode 提速:量化 → 权重变小 → 每 token 读得更少(带宽是硬上限)</td><td>exp3 带宽实测</td></tr>
+        <tr><td>投机解码:小模型起草、大模型一次验证多个</td><td>读 vLLM spec-decode 文档</td></tr>
+        <tr><td>Prefix caching / CUDA Graph:消重复 prefill 与 kernel 启动开销</td><td>已完成(TTFT 38×)</td></tr>
+        <tr><td rowspan="2"><b>更能装</b>(吞吐)</td><td>连续批调参:max-num-seqs / chunked prefill 预算</td><td>基线四档扫描</td></tr>
+        <tr><td>Prefill/Decode 分离:两类负载分池,各自满载</td><td>概念(单卡)</td></tr>
+        <tr><td rowspan="2"><b>更省</b>(显存)</td><td>权重/KV 量化、GQA/MLA 结构红利</td><td>exp1 记账对账</td></tr>
+        <tr><td>KV 分级存储:显存↔内存↔SSD 按热度流动(Mooncake 类)</td><td>概念</td></tr>
+        <tr><td><b>更聪明</b>(质量)</td><td>量化损失补偿、评测驱动:改任何东西前后都跑固定题库</td><td>lm-eval 流程</td></tr>
+      </tbody>
+    </table>
+    <h3>DeepInfer(DeepSeek 2026-10 开源)vs vLLM:改在哪,油水就在哪</h3>
+    <table>
+      <thead><tr><th>维度</th><th>vLLM</th><th>DeepInfer</th></tr></thead>
+      <tbody>
+        <tr><td>定位</td><td>通用:200+ 模型、完整在线服务</td><td>垂直:DeepSeek-V4.1-Flash 专用 + SM100/昇腾950 协同设计,先发离线版</td></tr>
+        <tr><td>并行</td><td>TP/PP/EP/DP 通用调度</td><td>attention 数据并行 + 均衡上下文并行 + 专家并行(含 EP 负载均衡)</td></tr>
+        <tr><td>解码</td><td>支持多草案投机方案</td><td>DSpark:置信度验证 + 变长多 token 预测</td></tr>
+        <tr><td>调度</td><td>同步为主</td><td>异步调度默认开(CPU 组批与 GPU 重叠);bounded replay 抑制解码期重复 prefill</td></tr>
+        <tr><td>第三方 8×B200</td><td>TTFT 更低</td><td>输出吞吐与 ITL 更优</td></tr>
+      </tbody>
+    </table>
+    <p class="tip">教学解读:DeepInfer 每处改动都指向"通用性税"——通用调度无法对特定注意力(MLA/稀疏)与特定硬件做极致编排。概念在 vLLM 学,极致看 DeepInfer,它是"学完基础后看高手怎么榨干"的标本。</p>
+    <h3>Apple 为什么显得快:数据搬运的胜利</h3>
+    <div class="apple">
+      <div class="pd"><b>独立显卡(本机)</b>
+        <svg viewBox="0 0 300 120">
+          <rect x="8" y="34" width="100" height="52" rx="9" fill="#eef1f5"/><text x="58" y="55" text-anchor="middle" font-size="11" fill="#1f2430">系统内存</text><text x="58" y="70" text-anchor="middle" font-size="9.5" fill="#69707d">权重先落这里</text>
+          <rect x="192" y="34" width="100" height="52" rx="9" fill="#dbe6f7"/><text x="242" y="55" text-anchor="middle" font-size="11" fill="#1f2430">显存 16GB</text><text x="242" y="70" text-anchor="middle" font-size="9.5" fill="#69707d">672GB/s 独占</text>
+          <line x1="112" y1="60" x2="188" y2="60" stroke="#d64545" stroke-width="3" class="flowline"/>
+          <text x="150" y="50" text-anchor="middle" font-size="9.5" fill="#d64545">PCIe 拷贝</text>
+          <text x="150" y="26" text-anchor="middle" font-size="9" fill="#69707d">加载/卸载/Offload 都要过这条窄桥</text>
+        </svg>
+        <div>带宽高,但两套内存:任何搬运都贵,KV/权重 offload 一旦跨界就慢。</div></div>
+      <div class="pd"><b>Apple 统一内存</b>
+        <svg viewBox="0 0 300 120">
+          <rect x="52" y="30" width="196" height="60" rx="12" fill="#e2f4f4"/>
+          <text x="150" y="47" text-anchor="middle" font-size="11" fill="#0e8f8f">同一块 LPDDR(~800GB/s 级)</text>
+          <text x="150" y="63" text-anchor="middle" font-size="9.5" fill="#69707d">容量可选到 192GB</text>
+          <rect x="64" y="70" width="46" height="14" rx="4" fill="#fff"/><text x="87" y="81" text-anchor="middle" font-size="8.5" fill="#1f2430">CPU</text>
+          <rect x="127" y="70" width="46" height="14" rx="4" fill="#fff"/><text x="150" y="81" text-anchor="middle" font-size="8.5" fill="#1f2430">GPU</text>
+          <rect x="190" y="70" width="46" height="14" rx="4" fill="#fff"/><text x="213" y="81" text-anchor="middle" font-size="8.5" fill="#1f2430">神经引擎</text>
+          <text x="150" y="20" text-anchor="middle" font-size="9" fill="#17954e">零拷贝:权重只存一份,三个计算单元直达</text>
+        </svg>
+        <div>带宽不如顶级独显,但"装得下 + 零搬运"本身就是速度;ANE 固定功能单元能效极高。对独显机器的启示:<b>减少数据搬运</b>(权重常驻、KV 不搬家)常常比堆算力更关键。</div></div>
+    </div>
+    <h3>业内工具链:三层视野</h3>
+    <table>
+      <thead><tr><th>层</th><th>工具</th><th>看什么</th></tr></thead>
+      <tbody>
+        <tr><td><b>常驻监控</b></td><td>vLLM <code>/metrics</code> + Prometheus(普罗米修斯)+ Grafana;nvitop / gpustat;DCGM</td><td>TTFT/TPOT 分布、队列深度、KV 占用、前缀命中率——事故都先在曲线上露头</td></tr>
+        <tr><td><b>按需剖析</b></td><td>vLLM 内置 torch profiler(<code>VLLM_TORCH_PROFILER_DIR</code> + <code>/start_profile</code>);py-spy 看 Python 卡点</td><td>算子级耗时表,导出 Chrome trace / TensorBoard</td></tr>
+        <tr><td><b>深潜优化</b></td><td>Nsight Systems(时间线气泡)/ Nsight Compute(单内核带宽利用率)</td><td>内核改写前后的证据;生产慎挂,在实验机(如本机)用</td></tr>
+        <tr><td><b>质量评测</b></td><td>lm-eval-harness、OpenCompass、自建 vibe 集</td><td>防止"快了但笨了"</td></tr>
+      </tbody>
+    </table>
+    <p class="tip">本机实验已就绪(WSL <code>~/playground/</code>):exp1 记账对账(公式 144KB/token ↔ 日志 56,704 tokens 对上)→ exp3 带宽上限(实测 543GB/s,8B-4bit 上限 118,实测 77.5=66%)→ exp2 算子热点(独占 GPU 跑)→ exp4 指标采集(压测时开一个终端看着)。</p>
+  </div>
+</section>
+
+</main>
+<footer>数据说明:延迟/吞吐/命中率为本机实测(vLLM 0.32.0,Qwen3 系列,2026-10-27);DeepInfer 信息据公开报道与仓库 README,细节以官方为准;Apple/华为对照为原理性总结,数字为量级参考。交互页面本地生成,无外部依赖,可离线双击打开。</footer>
+<div class="charttip" id="tip"></div>
+
+<script>
+(function(){
+"use strict";
+var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+var $ = function(id){ return document.getElementById(id); };
+function section(name, fn){ try{ fn(); }catch(e){ console.warn("section " + name + " failed:", e); } }
+
+/* 导航高亮 */
+section("nav", function(){
+  var links = document.querySelectorAll("#nav a");
+  var map = {};
+  links.forEach(function(a){ map[a.getAttribute("href").slice(1)] = a; });
+  var io = new IntersectionObserver(function(entries){
+    entries.forEach(function(en){
+      if(en.isIntersecting){
+        links.forEach(function(a){ a.classList.remove("active"); });
+        if(map[en.target.id]) map[en.target.id].classList.add("active");
+      }
+    });
+  }, {rootMargin:"-40% 0px -55% 0px"});
+  document.querySelectorAll("main section").forEach(function(s){ io.observe(s); });
+});
+
+/* ═══ ① 请求旅程 ═══ */
+section("journey", function(){
+  var STEPS = [
+    {em:"🧑", name:"客户端", no:"起点", what:"HTTP POST /v1/chat/completions:messages + max_tokens。OpenAI 协议是行业事实标准。", why:"任何 SDK、任何网关都能直接接入。", code:"curl / openai-sdk"},
+    {em:"🚪", name:"API 进程", no:"门卫", what:"校验参数 → 应用 chat 模板 → 分词,文本变 token id 序列。", why:"分词与 GPU 无关,放在引擎进程外:API 忙不拖累生成。", code:"vllm/entrypoints/openai/api_server.py · chat_completion/serving.py"},
+    {em:"📋", name:"Processor", no:"文书", what:"包装成引擎内部对象,分配 request_id,写入等待队列。", why:"统一生命周期:排队→运行→完成,可取消可统计。", code:"vllm/v1/engine/processor.py"},
+    {em:"🧠", name:"Scheduler", no:"大脑", what:"每步决定谁进 batch、谁被抢占;查前缀缓存命中哪些 KV 块。", why:"GPU 出算力不出脑力,一切策略在这层。", code:"vllm/v1/engine/scheduler.py"},
+    {em:"🗄️", name:"KV Manager", no:"仓管", what:"以 16-token 块为单位分配/回收/共享 KV 显存(查表寻址)。", why:"页表思想:利用率从 ~30% 提到 ~96%。", code:"vllm/v1/core/kv_cache_manager.py"},
+    {em:"⚙️", name:"GPU Worker", no:"肌肉", what:"prefill 一次算完输入并写 KV;之后每步全 batch 拼一起过模型。", why:"权重读一遍服务整批——并发吞吐的物理来源。", code:"vllm/v1/worker/gpu_model_runner.py"},
+    {em:"💧", name:"流式返回", no:"出口", what:"采样(temperature/top-p)→ 反分词 → SSE 增量推送;完成即释放 KV 块。", why:"首 token 立刻回给用户:TTFT 决定体感。", code:"vllm/v1/sample/ · detokenizer"}
+  ];
+  var pipe = $("pipe"), idx = 0, timer = null;
+  STEPS.forEach(function(s, i){
+    var d = document.createElement("div");
+    d.className = "pipe-node";
+    d.innerHTML = '<span class="em">' + s.em + "</span>" + s.name;
+    d.onclick = function(){ idx = i; render(); };
+    pipe.appendChild(d);
+  });
+  function movePkt(){
+    var nodes = pipe.children;
+    if(!nodes.length) return;
+    var n = nodes[Math.min(idx, nodes.length-1)];
+    var pkt = $("pkt");
+    pkt.style.left = (n.offsetLeft + n.offsetWidth/2 - 7) + "px";
+    pkt.style.top = (n.offsetTop + 4) + "px";
+  }
+  function render(){
+    for(var i=0;i<pipe.children.length;i++){
+      pipe.children[i].classList.toggle("act", i===idx);
+      pipe.children[i].classList.toggle("done", i<idx);
+    }
+    var s = STEPS[idx];
+    $("jDetail").innerHTML = '<div style="font-size:15px;font-weight:600">' + s.em + " " + (idx+1) + ". " + s.name +
+      ' <span style="color:var(--muted);font-weight:400;font-size:12.5px">(' + s.no + ')</span></div>' +
+      '<div style="font-size:13.5px;margin-top:5px"><b>做什么:</b>' + s.what + "</div>" +
+      '<div style="font-size:13.5px"><b>为什么存在:</b>' + s.why + "</div>" +
+      '<div style="margin-top:5px"><code>' + s.code + "</code></div>";
+    $("jCnt").textContent = (idx+1) + " / " + STEPS.length;
+    movePkt();
+  }
+  $("jPrev").onclick = function(){ idx = (idx + STEPS.length - 1) % STEPS.length; render(); };
+  $("jNext").onclick = function(){ idx = (idx + 1) % STEPS.length; render(); };
+  $("jAuto").onclick = function(){
+    if(timer){ clearInterval(timer); timer = null; this.textContent = "▶ 自动播放"; this.classList.remove("on"); }
+    else{
+      var self = this;
+      timer = setInterval(function(){ idx = (idx+1) % STEPS.length; render(); }, reduceMotion ? 3200 : 1900);
+      self.textContent = "⏸ 停止"; self.classList.add("on");
+    }
+  };
+  window.addEventListener("resize", movePkt);
+  render();
+});
+
+/* ═══ ② 显存账本 ═══ */
+section("memory", function(){
+  var M = {"1.7":{B:1.7, L:28, H:8, hd:128}, "8":{B:8, L:36, H:8, hd:128}, "32":{B:32, L:64, H:8, hd:128}};
+  function fmt(x){ return (x>=10 ? x.toFixed(1) : x.toFixed(2)); }
+  function calc(){
+    var m = M[$("mModel").value], bits = +$("mBits").value, kvB = +$("mKv").value;
+    var ctxK = +$("mCtx").value, conc = +$("mConc").value, vram = +$("mVram").value;
+    $("mCtxV").textContent = ctxK + "k"; $("mConcV").textContent = conc;
+    var W = m.B * bits/8 * 1.15;
+    var kvTok = 2*m.L*m.H*m.hd*kvB;
+    var KV = kvTok * ctxK*1024 * conc / 1073741824;
+    var OH = 1.4, used = W + KV + OH;
+    var cap = vram * 0.9; /* vLLM 默认水位 */
+    var wPct = Math.min(100, W/vram*100), kPct = Math.min(100-wPct, KV/vram*100);
+    $("mBar").innerHTML =
+      '<div class="memseg" style="width:' + wPct + '%;background:var(--blue)"><span>权重 ' + fmt(W) + 'GB</span></div>' +
+      '<div class="memseg" style="width:' + kPct + '%;background:var(--teal)"><span>KV ' + fmt(KV) + 'GB</span></div>' +
+      '<div class="memcap" style="left:' + (cap/vram*100) + '%"><i>90% 水位线</i></div>';
+    $("mLegend").innerHTML =
+      '<span><span class="sw" style="background:var(--blue)"></span>权重 <b>' + fmt(W) + ' GB</b>(参数×位宽+15%打包开销)</span>' +
+      '<span><span class="sw" style="background:var(--teal)"></span>KV 缓存 <b>' + fmt(KV) + ' GB</b>(' + conc + '路×' + ctxK + 'k)</span>' +
+      '<span><span class="sw" style="background:#9aa3af"></span>固定开销 ≈' + OH + ' GB(激活/CUDA上下文)</span>' +
+      '<span>合计 <b>' + fmt(used) + " / " + vram + " GB</b>(" + Math.round(used/vram*100) + "%)</span>";
+    $("mStats").innerHTML =
+      '<span>每 token KV:<b class="tag-num">' + (kvTok/1024).toFixed(0) + ' KB</b></span>' +
+      '<span>单路 ' + ctxK + 'k 上下文:<b class="tag-num">' + fmt(kvTok*ctxK*1024/1073741824) + ' GB</b></span>' +
+      '<span>理论单流上限:<b class="tag-num">' + (672/W).toFixed(0) + ' tok/s</b></span>';
+    var v = $("mVerdict");
+    if(used > cap) v.innerHTML = '<span class="badge r">❌ 超载</span> 超出 90% 水位 ' + fmt(used-cap) + " GB,会 OOM。出路:降位数 / 缩上下文 / 减并发 / 加卡(第 8 讲)。";
+    else if(used > vram*0.75) v.innerHTML = '<span class="badge o">⚠️ 偏紧</span> 贴近水位线,并发波动容易触发抢占/逐出。';
+    else v.innerHTML = '<span class="badge g">✅ 可行</span> 还有 ' + fmt(cap-used) + " GB 余量,可加并发或拉长上下文直到贴线。";
+  }
+  ["mModel","mBits","mKv","mCtx","mConc","mVram"].forEach(function(id){ $(id).addEventListener("input", calc); });
+  document.querySelectorAll(".pset").forEach(function(b){
+    b.onclick = function(){
+      $("mModel").value = b.dataset.m; $("mBits").value = b.dataset.b;
+      $("mCtx").value = b.dataset.c; $("mConc").value = b.dataset.n; calc();
+    };
+  });
+  calc();
+});
+
+/* ═══ ③ Roofline ═══ */
+section("roofline", function(){
+  var svg = $("roof"), W = 520, H = 300, m = {l:56, r:16, t:24, b:44};
+  var P = 8e9, Wbytes = 4.6e9, kvTok = 147456, CTX = 1024, BW = 672e9, FLOPS = 50e12;
+  var maxAI = 100, maxY = 80; /* TFLOPS */
+  function x(ai){ return m.l + ai/maxAI*(W-m.l-m.r); }
+  function y(t){ return H-m.b - t/maxY*(H-m.t-m.b); }
+  function build(){
+    var knee = FLOPS/BW; /* ~74 */
+    var p = [];
+    p.push('<text x="'+(W/2)+'" y="14" text-anchor="middle" font-size="12.5" fill="#1f2430" font-weight="600">屋顶线:可达算力 = min(带宽×强度, 峰值算力)</text>');
+    for(var t=0;t<=maxY;t+=20){
+      p.push('<line x1="'+m.l+'" y1="'+y(t)+'" x2="'+(W-m.r)+'" y2="'+y(t)+'" stroke="#e4e7ec"/>');
+      p.push('<text x="'+(m.l-7)+'" y="'+(y(t)+4)+'" text-anchor="end" font-size="10.5" fill="#69707d">'+t+'</text>');
+    }
+    for(var a=0;a<=maxAI;a+=20){
+      p.push('<line x1="'+x(a)+'" y1="'+(H-m.b)+'" x2="'+x(a)+'" y2="'+m.t+'" stroke="#e4e7ec"/>');
+      p.push('<text x="'+x(a)+'" y="'+(H-m.b+15)+'" text-anchor="middle" font-size="10.5" fill="#69707d">'+a+'</text>');
+    }
+    p.push('<text x="'+(W/2)+'" y="'+(H-6)+'" text-anchor="middle" font-size="11" fill="#69707d">算术强度(FLOP / Byte)→</text>');
+    p.push('<text x="14" y="'+(H/2)+'" transform="rotate(-90 14 '+(H/2)+')" text-anchor="middle" font-size="11" fill="#69707d">可达算力(TFLOPS)</text>');
+    /* 带宽斜线 0..knee */
+    var pts = [];
+    for(a=0;a<=knee;a+=2) pts.push(x(a)+","+y(a*BW/1e12));
+    p.push('<polyline points="'+pts.join(" ")+'" fill="none" stroke="#0e8f8f" stroke-width="2.5"/>');
+    p.push('<line x1="'+x(knee)+'" y1="'+y(FLOPS/1e12)+'" x2="'+(W-m.r)+'" y2="'+y(FLOPS/1e12)+'" stroke="#e8890c" stroke-width="2.5"/>');
+    p.push('<text x="'+x(knee-2)+'" y="'+(y(FLOPS/1e12)-8)+'" text-anchor="end" font-size="10.5" fill="#0e8f8f">带宽屋顶 672GB/s</text>');
+    p.push('<text x="'+(W-m.r-4)+'" y="'+(y(FLOPS/1e12)-8)+'" text-anchor="end" font-size="10.5" fill="#e8890c">算力屋顶 ~50T</text>');
+    p.push('<circle id="roofPt" r="7" fill="#2f6fd6" stroke="#fff" stroke-width="2.5"/>');
+    p.push('<text id="roofLbl" font-size="11" fill="#2f6fd6" font-weight="600"></text>');
+    svg.innerHTML = p.join("");
+  }
+  function update(){
+    var B = +$("rB").value; $("rBv").textContent = B;
+    var flops = 2*P*B, bytes = Wbytes + B*kvTok*CTX;
+    var ai = flops/bytes;                      /* FLOP/Byte */
+    var attain = Math.min(BW*ai, FLOPS)/1e12;  /* TFLOPS */
+    var bound = BW*ai < FLOPS ? "带宽受限" : "算力受限";
+    var stepMs = Math.max(bytes/BW, flops/FLOPS)*1e3;
+    var totTok = B/stepMs*1e3;
+    var px = x(Math.min(ai, maxAI)), py = y(attain);
+    var pt = $("roofPt"), lb = $("roofLbl");
+    pt.setAttribute("cx", px); pt.setAttribute("cy", py);
+    lb.setAttribute("x", Math.min(px+12, W-150)); lb.setAttribute("y", Math.max(py-12, 20));
+    lb.textContent = "batch=" + B + " → " + bound;
+    $("rOut").innerHTML =
+      '<div style="font-size:12.5px"><b>当前工作点</b></div>' +
+      '<div class="statsrow" style="flex-direction:column;gap:3px;margin-top:6px">' +
+      '<span>算术强度:<b class="tag-num">' + ai.toFixed(1) + '</b> FLOP/Byte</span>' +
+      '<span>瓶颈:<b>' + bound + '</b>(理想 step ' + stepMs.toFixed(1) + ' ms)</span>' +
+      '<span>理想总吞吐:<b class="tag-num">' + totTok.toFixed(0) + '</b> tok/s(每流 ' + (totTok/B).toFixed(0) + ')</span>' +
+      '<span class="tip" style="margin:0">带宽吃满程度:' + Math.min(100, BW*ai/FLOPS*100).toFixed(0) + '%</span></div>';
+  }
+  $("rB").addEventListener("input", update);
+  build(); update();
+});
+
+/* ═══ ④ 分页 KV ═══ */
+section("paged", function(){
+  var MAXTOK = 1024, BLK = 256, share = true;
+  var lens = [], maps = [], pool = [], nextPhys = 0, seq = 0;
+  function rand(){ seq++; var x = Math.sin(seq*9973+11)*10000; return x - Math.floor(x); }
+  function render(){
+    var oldHtml = "", total = 0, used = 0;
+    var cols = ["#2f6fd6","#e8890c","#17954e","#7c5cd6","#0e8f8f"];
+    lens.forEach(function(len, i){
+      total += MAXTOK; used += len;
+      oldHtml += '<div class="pgrow"><div style="width:52px;color:var(--muted)">请求' + (i+1) + '</div>' +
+        '<div class="bar"><div class="fill" style="width:' + (len/MAXTOK*100) + '%;background:' + cols[i%5] + '"></div>' +
+        '<div class="waste" style="width:' + ((1-len/MAXTOK)*100) + '%"></div></div>' +
+        '<div style="width:150px;color:var(--muted)">' + len + '/1024,浪费' + (MAXTOK-len) + '</div></div>';
+    });
+    $("pgOld").innerHTML = oldHtml || '<div class="tip">点"来一条请求"</div>';
+    $("pgOldCnt").innerHTML = lens.length ? '<span>利用率 <b class="tag-num">' + Math.round(used/total*100) + '%</b></span><span>浪费 <b class="tag-num" style="color:var(--red)">' + Math.round((1-used/total)*100) + '%</b></span>' : "";
+    /* 块池 */
+    var POOLN = Math.max(36, nextPhys);
+    var ph = "";
+    for(var b=0;b<POOLN;b++){
+      if(b < nextPhys){
+        var isSh = pool[b] === "S";
+        ph += '<div class="blk' + (b >= nextPhys-3 ? " new" : "") + '" style="background:' + (isSh ? "#e8890c" : "#2f6fd6") + '"' +
+          (isSh ? ' title="共享:系统提示词块(所有请求指向它)"' : "") + "></div>";
+      } else ph += '<div class="blk free"></div>';
+    }
+    $("pgPool").innerHTML = ph;
+    var mh = "";
+    maps.forEach(function(list, i){
+      mh += '<div class="ptable">请求' + (i+1) + ' 页表: 逻辑[' + list.map(function(_,k){return k;}).join(",") + '] → 物理[' + list.join(",") + "]" + (list.length && pool[list[0]]==="S" ? " ←首块共享" : "") + "</div>";
+    });
+    $("pgMaps").innerHTML = mh;
+    var served = lens.reduce(function(a,b){return a+b;},0), phys = nextPhys*BLK;
+    if(lens.length){
+      $("pgNewCnt").innerHTML = '<span>物理占用 <b class="tag-num">' + phys + '</b> tok</span><span>服务总量 <b class="tag-num">' + served + '</b> tok</span><span>共享红利 <b class="tag-num" style="color:var(--green)">' + Math.round(served/phys*100) + '%</b>(>100% 部分即共享省下)</span>';
+    } else $("pgNewCnt").innerHTML = "";
+  }
+  $("pgAdd").onclick = function(){
+    var len = 120 + Math.floor(rand()*780);
+    lens.push(len);
+    var n = Math.ceil(len/BLK), list = [];
+    for(var k=0;k<n;k++){
+      if(k===0 && share){
+        if(pool.indexOf("S") < 0){ pool.push("S"); nextPhys++; }
+        list.push(pool.indexOf("S"));
+      } else { pool.push(seq); list.push(nextPhys); nextPhys++; }
+    }
+    maps.push(list); render();
+  };
+  $("pgEvict").onclick = function(){
+    if(!lens.length) return;
+    lens.shift(); var drop = maps.shift();
+    var keep = pool.map(function(v,i){ return drop.indexOf(i)>=0 && v!=="S" ? null : v; });
+    /* 重压缩编号 */
+    var newPool = [], remap = {};
+    keep.forEach(function(v,i){ if(v!==null){ remap[i] = newPool.length; newPool.push(v); } });
+    maps = maps.map(function(list){ return list.map(function(i){ return remap[i] !== undefined ? remap[i] : i; }); });
+    pool = newPool; nextPhys = pool.length; render();
+  };
+  $("pgShare").onclick = function(){
+    share = !share;
+    this.classList.toggle("on", share);
+    this.textContent = "共享系统提示词块:" + (share ? "开" : "关");
+  };
+  $("pgReset").onclick = function(){ lens=[]; maps=[]; pool=[]; nextPhys=0; seq=0; render(); };
+  render();
+});
+
+/* ═══ ⑤ 批与调度 ═══ */
+section("batch", function(){
+  var DUR = [160,260,340,520,240,420,300,200,180,280,380,500,220,360,320,260];
+  var LOOP = 1700;
+  var sched = null, t = 0, playing = false, raf = null, last = 0;
+  function buildLane(lane, mode){
+    lane.innerHTML = "";
+    var laneW = Math.max(220, lane.clientWidth || 300);
+    var px = laneW/LOOP;
+    var S = [];
+    if(mode === "static"){
+      for(var b=0;b<3;b++){
+        var t0 = b*560, mx = 0;
+        for(var i=0;i<4;i++) mx = Math.max(mx, DUR[(b*4+i)%DUR.length]);
+        for(i=0;i<4;i++) S.push({s:t0, d:DUR[(b*4+i)%DUR.length], mx:mx, row:i});
+      }
+    } else {
+      var tt = 0, active = [null,null,null,null], idx = 0;
+      while(S.length < 16){
+        for(var r=0;r<4;r++) if(!active[r] && idx < DUR.length){ active[r] = {s:tt, d:DUR[idx], row:r}; idx++; }
+        var mn = Infinity, mr = -1;
+        for(r=0;r<4;r++) if(active[r] && active[r].s+active[r].d < mn){ mn = active[r].s+active[r].d; mr = r; }
+        if(mr < 0) break;
+        S.push(active[mr]); active[mr] = null; tt = mn;
+      }
+    }
+    var cols = ["#2f6fd6","#e8890c","#17954e","#7c5cd6"];
+    S.forEach(function(r, i){
+      var el = document.createElement("div");
+      el.className = "req";
+      el.style.top = (2 + r.row*28) + "px";
+      el.style.left = (r.s*px) + "px";
+      el.style.width = Math.max(5, r.d*px) + "px";
+      el.style.background = cols[r.row%4];
+      var prog = document.createElement("div"); prog.className = "prog"; prog.id = (mode==="s"?"sp":"cp") + i;
+      el.appendChild(prog);
+      if(mode === "static" && r.d < r.mx){
+        var g = document.createElement("div"); g.className = "ghost";
+        g.style.left = (r.d*px) + "px"; g.style.width = Math.max(3,(r.mx-r.d)*px) + "px";
+        el.appendChild(g);
+      }
+      lane.appendChild(el);
+    });
+    return S;
+  }
+  var SS, CS;
+  function init(){
+    if($("laneS").clientWidth === 0) return false;
+    SS = buildLane($("laneS"), "static");
+    CS = buildLane($("laneC"), "cont");
+    return true;
+  }
+  var iv = null;
+  function tick(){
+    t += 33 * (+$("bSpd").value) * (reduceMotion ? 0.5 : 1);
+    if(t > LOOP) t = 0;
+    $("bTime").textContent = "t = " + Math.round(t) + " ms";
+    function paint(S, pre){
+      var busy = 0;
+      S.forEach(function(r,i){
+        var el = $(pre+i); if(!el) return;
+        var p = Math.max(0, Math.min(1,(t-r.s)/r.d));
+        el.style.width = (p*100) + "%";
+        if(t>=r.s && t<=r.s+r.d) busy++;
+      });
+      return busy;
+    }
+    paint(SS,"sp"); var bc = paint(CS,"cp");
+    var utilS = 0;
+    SS.forEach(function(r){ if(t>=r.s && t<=r.s+r.mx){ if(t <= r.s+r.d) utilS += 1; } });
+    $("bUtilS").textContent = "静态批 GPU 利用 " + Math.round(utilS/4*100) + "%";
+    $("bUtilC").textContent = "连续批 GPU 利用 " + Math.round(bc/4*100) + "%";
+  }
+  $("bPlay").onclick = function(){
+    playing = !playing;
+    this.textContent = playing ? "⏸ 暂停" : "▶ 播放";
+    if(playing){ iv = setInterval(tick, 33); }
+    else if(iv){ clearInterval(iv); iv = null; }
+  };
+  var ok = init();
+  if(!ok){
+    var io = new MutationObserver(function(){ if(!ok && init()){ ok = true; io.disconnect(); } });
+    io.observe(document.body, {attributes:true, subtree:true, childList:true});
+  }
+  /* chunked prefill 条 */
+  function cpStrip(el, chunk){
+    var html = "", seq;
+    if(chunk){
+      seq = ["p","d","p","d","p","d","p","d","p","d"];
+    } else {
+      seq = ["P","","","","d","d","d","d","d","d"];
+    }
+    seq.forEach(function(k){
+      var c = k==="p" ? "var(--orange)" : k==="P" ? "var(--red)" : k==="d" ? "var(--green)" : "#edf0f4";
+      var lab = k==="p" ? "prefill片" : k==="P" ? "整段prefill" : k==="d" ? "decode" : "停摆";
+      html += '<div style="flex:1;height:30px;border-radius:6px;background:' + c + ';display:flex;align-items:center;justify-content:center;font-size:10.5px;color:' + (k?"#fff":"#b3bac4") + '">' + lab + "</div>";
+    });
+    el.innerHTML = '<div style="display:flex;gap:4px;margin-top:6px">' + html + "</div>";
+  }
+  cpStrip($("cpOff"), false); cpStrip($("cpOn"), true);
+  /* 实测柱状图 + tooltip */
+  (function chart(){
+    var svg = $("bChart"), W = 640, H = 240, m = {l:52,r:14,t:26,b:36};
+    var data = [
+      {c:"并发1", v:71.7, per:77.5, ttft:278, tpot:12.9},
+      {c:"并发2", v:122.9, per:68.6, ttft:449, tpot:14.6},
+      {c:"并发4", v:209.6, per:61.5, ttft:737, tpot:16.3},
+      {c:"并发8", v:320.5, per:50.3, ttft:1307, tpot:19.9}
+    ];
+    var max = 360, p = [];
+    for(var g=0;g<=4;g++){
+      var yv = g*90, yy = H-m.b-(yv/max)*(H-m.t-m.b);
+      p.push('<line x1="'+m.l+'" y1="'+yy+'" x2="'+(W-m.r)+'" y2="'+yy+'" stroke="#e4e7ec"/>');
+      p.push('<text x="'+(m.l-7)+'" y="'+(yy+4)+'" text-anchor="end" font-size="10.5" fill="#69707d">'+yv+'</text>');
+    }
+    p.push('<text x="'+(W/2)+'" y="'+(H-4)+'" text-anchor="middle" font-size="11" fill="#69707d">固定并发档位(32 请求,输出 256 token)</text>');
+    p.push('<text x="13" y="'+(H/2)+'" transform="rotate(-90 13 '+(H/2)+')" text-anchor="middle" font-size="11" fill="#69707d">输出吞吐 tok/s</text>');
+    var bw = (W-m.l-m.r)/data.length;
+    data.forEach(function(d, i){
+      var h = (d.v/max)*(H-m.t-m.b);
+      var bx = m.l + i*bw + bw*0.2, wid = bw*0.6;
+      p.push('<rect class="bar" data-i="'+i+'" x="'+bx+'" y="'+(H-m.b-h)+'" width="'+wid+'" height="'+h+'" rx="6" fill="#2f6fd6" opacity="'+(i===3?1:0.82)+'"/>');
+      p.push('<text x="'+(bx+wid/2)+'" y="'+(H-m.b-h-7)+'" text-anchor="middle" font-size="12.5" fill="#1f2430" font-weight="600">'+d.v+'</text>');
+      p.push('<text x="'+(bx+wid/2)+'" y="'+(H-m.b+15)+'" text-anchor="middle" font-size="11" fill="#69707d">'+d.c+'</text>');
+      if(i===3) p.push('<text x="'+(bx+wid/2)+'" y="'+(H-m.b-h-22)+'" text-anchor="middle" font-size="10.5" fill="#17954e">每流 50.3</text>');
+    });
+    svg.innerHTML = p.join("");
+    var tip = $("tip");
+    svg.addEventListener("mousemove", function(ev){
+      var r = ev.target.closest(".bar");
+      if(!r){ tip.style.opacity = 0; return; }
+      var d = data[+r.getAttribute("data-i")];
+      tip.innerHTML = "<b>" + d.c + "</b>(本机实测)<br>总吞吐 " + d.v + " tok/s<br>每流 " + d.per + " tok/s<br>平均TTFT " + d.ttft + " ms<br>TPOT " + d.tpot + " ms";
+      tip.style.left = Math.min(ev.clientX+14, window.innerWidth-240) + "px";
+      tip.style.top = (ev.clientY+14) + "px";
+      tip.style.opacity = 1;
+    });
+    svg.addEventListener("mouseleave", function(){ tip.style.opacity = 0; });
+  })();
+});
+
+/* ═══ ⑥ 源码地图 ═══ */
+section("codemap", function(){
+  var CHAIN = ["entrypoints/openai","v1/engine/processor","v1/engine/scheduler","v1/core/kv_cache_manager","v1/worker/gpu_model_runner","v1/sample"];
+  var chainEl = $("codeChain");
+  CHAIN.forEach(function(c, i){
+    if(i) chainEl.insertAdjacentHTML("beforeend", "<em>→</em>");
+    chainEl.insertAdjacentHTML("beforeend", "<span><code>" + c + "</code></span>");
+  });
+  var CODE = [
+    {k:"entrypoints/", t:"API 门面", d:"OpenAI 兼容服务、CLI、协议解析。chat_completion/serving.py 就是 /v1/chat/completions 的实现;改接口行为从这里入手。", r:"第 1 站,配合日志读"},
+    {k:"v1/engine/", t:"引擎心脏", d:"processor.py 包装请求 → scheduler.py 每步组批/抢占/前缀查询 → core.py 引擎主循环。系统的'脑'全在这。", r:"必读,scheduler 先啃"},
+    {k:"v1/core/", t:"KV 仓库", d:"kv_cache_manager.py:块的分配/命中/逐出,prefix caching 的命中逻辑所在。第 4 讲'页表'的实现。", r:"配合 scheduler 一起读"},
+    {k:"v1/worker/", t:"GPU 执行", d:"gpu_model_runner.py 把 batch 变成真正的 kernel 调用序列;prefill/decode 分支、CUDA Graph 捕获都在这。", r:"第二遍读"},
+    {k:"attention/", t:"注意力后端", d:"FlashAttention / FlashInfer / Triton 多后端可插拔,同一接口不同内核。理解'算子层优化空间'看这里。", r:"挑一个后端精读"},
+    {k:"quantization/", t:"量化方法", d:"AWQ/GPTQ/FP8 各是一个类:怎么解压压缩权重、用哪个内核算。第 7 讲的落地处。", r:"做量化实验时读"},
+    {k:"distributed/", t:"并行通信", d:"TP 的 all-reduce、PP 的流水传递、EP 的 all-to-all。第 8 讲的代码依据。", r:"上多卡前读"},
+    {k:"platforms/", t:"硬件抽象", d:"NVIDIA/AMD/昇腾等平台能力探测与补丁;理解'一套代码多硬件'的代价。", r:"浏览即可"}
+  ];
+  var list = $("codeList");
+  CODE.forEach(function(c, i){
+    var b = document.createElement("button");
+    b.className = "ci" + (i===1?" act":"");
+    b.innerHTML = '<code>vllm/' + c.k + "</code><small>" + c.t + "</small>";
+    b.onclick = function(){
+      list.querySelectorAll(".ci").forEach(function(x){ x.classList.remove("act"); });
+      b.classList.add("act"); show(i);
+    };
+    list.appendChild(b);
+  });
+  function show(i){
+    var c = CODE[i];
+    $("codeDetail").innerHTML = '<div style="font-weight:650;font-size:14.5px"><code>vllm/' + c.k + "</code> — " + c.t + "</div>" +
+      '<div style="font-size:13.5px;margin-top:6px">' + c.d + "</div>" +
+      '<div class="tip" style="margin-top:6px">阅读建议:' + c.r + "</div>";
+  }
+  show(1);
+});
+
+/* ═══ ⑦ 量化 ═══ */
+section("quant", function(){
+  var cube = $("qCube");
+  for(var i=0;i<48;i++){ cube.insertAdjacentHTML("beforeend", "<i></i>"); }
+  function fmt(x){ return x>=10 ? x.toFixed(1) : x.toFixed(2); }
+  function calc(){
+    var bits = +$("qBits").value;
+    $("qBitsV").textContent = bits + " bit";
+    var W = 8*bits/8*1.15;
+    var ceil = 672/W;
+    var vis = Math.max(2, Math.round(48*bits/16));
+    cube.querySelectorAll("i").forEach(function(el, i){
+      el.style.opacity = i < vis ? .85 : .12;
+      el.style.transform = i < vis ? "scale(1)" : "scale(.72)";
+    });
+    $("qStats").innerHTML =
+      '<span>权重:<b class="tag-num">' + fmt(W) + ' GB</b></span>' +
+      '<span>理论单流:<b class="tag-num">' + ceil.toFixed(0) + ' tok/s</b></span>' +
+      '<span>16GB 卡剩余给 KV:<b class="tag-num">' + fmt(Math.max(0, 16*0.9-W-1.4)) + ' GB</b></span>';
+    var q;
+    if(bits>=16) q = "无损基线。但 8B 权重就 15GB——量化常不是可选项,而是入场券。";
+    else if(bits>=8) q = "FP8/INT8 损失可忽略(PPL <1%),H100+ 是免费午餐;本卡无原生 FP8 算力,收益打折。";
+    else if(bits>=4) q = "AWQ/GPTQ-INT4:日常基本无感,本机实测 77.5 tok/s ← 现状。";
+    else if(bits===3) q = "开始需要特殊格式与训练补偿,长文/数学退化可感知。";
+    else q = "2-bit 需 AQLM/QuIP 类方法,'装得下'和'算得对'开始冲突。";
+    $("qQuality").innerHTML = "<b>质量:</b>" + q;
+    /* 柱状图 */
+    var svg = $("qChart"), Wd = 330, H = 210, m = {l:40,r:10,t:18,b:30};
+    var data = [{b:16,g:18.4},{b:8,g:9.2},{b:4,g:4.6},{b:3,g:3.45},{b:2,g:2.3}].map(function(d){
+      return {b:d.b, v:672/d.g};
+    });
+    var max = 300, p = ['<line x1="'+m.l+'" y1="'+(H-m.b)+'" x2="'+(Wd-m.r)+'" y2="'+(H-m.b)+'" stroke="#c9d2e0"/>'];
+    p.push('<text x="'+(Wd/2)+'" y="12" text-anchor="middle" font-size="11" fill="#69707d">理论单流上限(tok/s)· 8B 模型</text>');
+    var bw = (Wd-m.l-m.r)/data.length;
+    data.forEach(function(d, i){
+      var h = Math.min(1, d.v/max)*(H-m.t-m.b);
+      var bx = m.l + i*bw + bw*0.18, wid = bw*0.64;
+      var act = d.b === bits;
+      p.push('<rect x="'+bx+'" y="'+(H-m.b-h)+'" width="'+wid+'" height="'+h+'" rx="5" fill="'+(act?"#2f6fd6":"#c6d3e8")+'"/>');
+      p.push('<text x="'+(bx+wid/2)+'" y="'+(H-m.b-h-5)+'" text-anchor="middle" font-size="10.5" fill="#1f2430">'+Math.round(d.v)+'</text>');
+      p.push('<text x="'+(bx+wid/2)+'" y="'+(H-m.b+14)+'" text-anchor="middle" font-size="10" fill="#69707d">'+d.b+'bit</text>');
+    });
+    var y4 = H-m.b-Math.min(1,77.5/max)*(H-m.t-m.b);
+    p.push('<line x1="'+m.l+'" y1="'+y4+'" x2="'+(Wd-m.r)+'" y2="'+y4+'" stroke="#17954e" stroke-width="1.8" stroke-dasharray="6 5"/>');
+    p.push('<text x="'+(Wd-m.r)+'" y="'+(y4-5)+'" text-anchor="end" font-size="10" fill="#17954e">实测 77.5</text>');
+    svg.innerHTML = p.join("");
+  }
+  $("qBits").addEventListener("input", calc);
+  calc();
+});
+
+/* ═══ ⑧ 多卡多机 ═══ */
+section("dist", function(){
+  var SVGS = {
+    tp: '<svg viewBox="0 0 230 96"><rect x="8" y="26" width="86" height="44" rx="8" fill="#dbe6f7"/><text x="51" y="52" text-anchor="middle" font-size="10.5" fill="#1f2430">大矩阵乘</text><rect x="128" y="10" width="94" height="34" rx="7" fill="#2f6fd6"/><text x="175" y="31" text-anchor="middle" font-size="10" fill="#fff">卡0:上半</text><rect x="128" y="52" width="94" height="34" rx="7" fill="#2f6fd6" opacity=".7"/><text x="175" y="73" text-anchor="middle" font-size="10" fill="#fff">卡1:下半</text><path d="M100 38 L124 28 M100 58 L124 66" stroke="#e8890c" stroke-width="2.2" class="flowline" fill="none"/><text x="112" y="12" text-anchor="middle" font-size="9" fill="#e8890c">每层 all-reduce</text></svg>',
+    pp: '<svg viewBox="0 0 230 96"><rect x="10" y="30" width="62" height="36" rx="7" fill="#2f6fd6"/><text x="41" y="52" text-anchor="middle" font-size="9.5" fill="#fff">层1-12</text><rect x="84" y="30" width="62" height="36" rx="7" fill="#2f6fd6" opacity=".75"/><text x="115" y="52" text-anchor="middle" font-size="9.5" fill="#fff">层13-24</text><rect x="158" y="30" width="62" height="36" rx="7" fill="#2f6fd6" opacity=".55"/><text x="189" y="52" text-anchor="middle" font-size="9.5" fill="#fff">层25-36</text><circle r="4" fill="#e8890c"><animateMotion dur="2.2s" repeatCount="indefinite" path="M14 78 L74 78 M94 78 L148 78 M168 78 L216 78"/></circle><text x="115" y="16" text-anchor="middle" font-size="9" fill="#69707d">token 像流水线过车间,批间有空泡</text></svg>',
+    ep: '<svg viewBox="0 0 230 96"><rect x="45" y="6" width="140" height="16" rx="5" fill="#eef1f5"/><text x="115" y="18" text-anchor="middle" font-size="9.5" fill="#1f2430">一批 token(各自选 top-k 专家)</text><rect x="24" y="62" width="56" height="22" rx="6" fill="#17954e"/><text x="52" y="77" text-anchor="middle" font-size="9.5" fill="#fff">专家A组</text><rect x="87" y="62" width="56" height="22" rx="6" fill="#17954e" opacity=".8"/><text x="115" y="77" text-anchor="middle" font-size="9.5" fill="#fff">专家B组</text><rect x="150" y="62" width="56" height="22" rx="6" fill="#17954e" opacity=".6"/><text x="178" y="77" text-anchor="middle" font-size="9.5" fill="#fff">专家C组</text><path d="M80 24 L52 60 M115 24 L115 60 M150 24 L178 60" stroke="#0e8f8f" stroke-width="2" class="flowline" fill="none"/><text x="115" y="45" text-anchor="middle" font-size="9" fill="#0e8f8f">all-to-all 动态路由</text></svg>',
+    dp: '<svg viewBox="0 0 230 96"><circle cx="115" cy="16" r="13" fill="#7c5cd6"/><text x="115" y="20" text-anchor="middle" font-size="9" fill="#fff">LB</text><rect x="18" y="58" width="58" height="26" rx="7" fill="#7c5cd6" opacity=".85"/><text x="47" y="74" text-anchor="middle" font-size="9.5" fill="#fff">副本1</text><rect x="86" y="58" width="58" height="26" rx="7" fill="#7c5cd6" opacity=".65"/><text x="115" y="74" text-anchor="middle" font-size="9.5" fill="#fff">副本2</text><rect x="154" y="58" width="58" height="26" rx="7" fill="#7c5cd6" opacity=".45"/><text x="183" y="74" text-anchor="middle" font-size="9.5" fill="#fff">副本3</text><path d="M104 28 L47 56 M115 28 L115 56 M126 28 L183 56" stroke="#7c5cd6" stroke-width="2" class="flowline" fill="none"/><text x="115" y="42" text-anchor="middle" font-size="9" fill="#7c5cd6">按队列深度分流</text></svg>'
+  };
+  function card(key, title, body, fit){
+    return '<div class="dpcard' + (fit?' pick':'') + '"><span class="fitflag badge' + (fit?' g':'') + '">' + (fit?'✓ 推荐':'') + '</span>' +
+      '<div class="svghd">' + title + "</div>" + SVGS[key] + '<div class="tip" style="margin-top:4px">' + body + "</div></div>";
+  }
+  function calc(){
+    var s = $("dScene").value, el = $("dCards");
+    if(s === "a"){
+      el.innerHTML =
+        card("tp","张量并行 TP=2","每卡一半权重(9GB)+一半 KV,仍有 5GB 余量;代价:每层一次 all-reduce,卡间带宽要够(PCIe4 x8 起,最好 NVLink)。", true) +
+        card("pp","流水线并行 PP=2","按层切,显存同样分摊;流水空泡使延迟升高、通信量更小,适合跨机。", false) +
+        card("dp","数据并行 DP=2","每卡放完整 18GB 权重?16GB 卡直接放不下——DP 只在单卡装得下时用。", false) +
+        card("ep","专家并行 EP","32B 是稠密模型没有专家可切;仅 MoE 适用。", false);
+      $("dAdvice").innerHTML = "<b>结论:TP=2。</b>两卡同机、驱动一致即可;WSL2 双卡同样透传可见。";
+      $("dCmd").innerHTML = "命令:<code>vllm serve ~/models/Qwen3-32B-AWQ --tensor-parallel-size 2 --gpu-memory-utilization 0.9 --max-model-len 8192</code>(本机单卡,留作加卡后第一课)";
+    } else if(s === "b"){
+      el.innerHTML =
+        card("dp","不并行+量化 ✅","8B-INT4 权重 5.6GB,剩余 ~8GB 全给 KV,并发容量反而比 BF16+TP 更大。", true) +
+        card("tp","TP=2 过度设计","小模型单卡已够快,拆卡收益有限,白占一张卡。", false) +
+        card("dp","先加并发再谈并行","基线:并发 8 总吞吐 320 tok/s 才刚进入批红利区;调度参数比加卡便宜得多。", true) +
+        card("ep","EP 不适用","稠密模型。", false);
+      $("dAdvice").innerHTML = "<b>结论:单卡 + INT4 + 调调度。</b>同一块 GPU 上,把 batch 做大永远比把模型拆开便宜——并行是为了'装得下',不是'跑得快'。";
+      $("dCmd").textContent = "";
+    } else {
+      el.innerHTML =
+        card("dp","DP 优先(吞吐)","整副本复制 + 外部负载均衡;跨机无需 all-reduce,扩展最线性。", true) +
+        card("ep","EP(MoE 必备)","专家分布各卡,token 按 top-k 路由 all-to-all;DeepSeek 的 DeepEP 就是专用通信库(dispatch+combine 两层)。", true) +
+        card("tp","TP/PP 兜底","跨机 all-reduce 被网络延迟放大,TP 只在机内划算;PP 气泡大但通信小。", false) +
+        card("pp","PD 分离","prefill 池与 decode 池物理分开、中间传 KV:消掉互相干扰;DeepSeek/字节生产标配。", true);
+      $("dAdvice").innerHTML = "<b>大规模组合拳:DP × EP × PD 分离。</b>DeepInfer 基准即 4 卡 prefill + 64 卡 decode 的池化形态——先解决'装得下'(TP/EP),再追求'不打架'(PD、异步调度)。这也是 vLLM 社区 roadmap 主战场。";
+      $("dCmd").textContent = "";
+    }
+  }
+  $("dScene").addEventListener("change", calc);
+  calc();
+});
+
+})();
+</script>
+</body>
+</html>
