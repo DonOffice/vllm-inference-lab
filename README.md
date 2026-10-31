@@ -14,16 +14,16 @@
    - 全部带复现命令和原始 JSON
 3. **国内网络环境的完整落地细节**——清华镜像、flashinfer 无 cubin 的 nvcc 坑、conda 共享 CUDA 工具链方案、可编辑安装的 nightly 时滞,全是亲手踩出来的
 
-## 📊 实测数据速览(Qwen3-8B-AWQ @ 4070 Ti Super)
+## 📊 实测数据速览(Qwen3-8B-AWQ @ 4070 Ti Super,预热后 2026-10-31 同日 A/B)
 
-| 并发 | 总吞吐 (tok/s) | 每流 (tok/s) | 平均 TTFT (ms) |
-|---:|---:|---:|---:|
-| 1 | 71.7 | 77.5 | 278 |
-| 2 | 122.9 | 68.6 | 449 |
-| 4 | 209.6 | 61.5 | 737 |
-| 8 | 320.5 | 50.3 | 1307 |
+| 并发 | vLLM 吞吐 (tok/s) | SGLang 吞吐 (tok/s) | vLLM TTFT (ms) | SGLang TTFT (ms) |
+|---:|---:|---:|---:|---:|
+| 1 | 90.6 | 96.9 | 212 | 201 |
+| 2 | 164.6 | 166.2 | 332 | 315 |
+| 4 | 279.2 | 274.0 | 539 | 582 |
+| 8 | 426.4 | 418.5 | 990 | 1014 |
 
-单流 77.5 tok/s = 理论上限(672GB/s ÷ 5.6GB ≈ 118)的 66% —— 剩下的 34% 去了哪?见 [exp2 算子热点](playground/README.md)。prefix caching 实测:多轮对话 TTFT **1070ms → 28ms(≈36×)**,含 metrics/日志双证据:[实验报告](docs/实验报告.md)。
+稳态两者打平(±7% 内);单流 97.6 tok/s ≈ 实测有效带宽(543GB/s)推算上限的 83%。**比数字更有价值的是过程**:横评当天 benchmark 先后骗了我们两次(冷启动税压低 26-33%、SGLang 0.9 水位触发 CUDA-graph 显存悬崖 P99 达 338 秒),全部抓出并留档:[SGLang-vs-vLLM横评](docs/SGLang-vs-vLLM横评.md)。prefix caching 实测:多轮对话 TTFT **1070ms → 28ms(≈36×)**,证据三件套见 [实验报告](docs/实验报告.md)。
 
 ## 🚀 快速开始(同款硬件 30 分钟起步)
 
@@ -52,7 +52,8 @@ VLLM_USE_FLASHINFER_SAMPLER=0 vllm serve ~/models/Qwen3-8B-AWQ \
 
 ## 🗺️ Roadmap
 
-- [ ] SGLang vs vLLM 同负载横评(脚本已就绪)
+- [x] SGLang vs vLLM 同负载横评(同日同预热 A/B + 两个 benchmark 陷阱实录)→ [docs/SGLang-vs-vLLM横评.md](docs/SGLang-vs-vLLM横评.md)
+- [ ] SGLang 修复 PR(等 [#47420](https://github.com/sgl-project/sglang/issues/47420) 维护者表态)
 - [ ] 投机解码(speculative decoding)实测:收益与开销
 - [ ] 2×GPU 张量并行跑 Qwen3-32B(等硬件)
 - [ ] 交互讲解页英文版
